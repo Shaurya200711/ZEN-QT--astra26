@@ -9,7 +9,10 @@
     "lint": "eslint"
   },
   "dependencies": {
+<<<<<<< HEAD
     "@supabase/supabase-js": "^2.119.2",
+=======
+>>>>>>> 19d606d48d6fabdba824bd02999675112e3036b7
     "groq-sdk": "^1.6.0",
     "leaflet": "^1.9.4",
     "next": "16.4.6",

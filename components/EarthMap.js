@@ -1,12 +1,23 @@
+import { useEffect, useState } from 'react';
 import { MapContainer, TileLayer, Circle, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 
 export default function EarthMap({ disasters }) {
+  // Add a mount check to prevent the appendChild error
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  // Return nothing until the DOM is completely ready for Leaflet
+  if (!isMounted) return null;
+
   return (
     <MapContainer 
       center={[16.5, 80.5]} 
       zoom={5} 
-      style={{ height: '100%', width: '100%', background: '#0b1120' }}
+      style={{ height: '100%', width: '100%', background: '#040814' }}
       zoomControl={false}
     >
       {/* Dark Mode Base Map */}

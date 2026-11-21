@@ -7,7 +7,6 @@ export default function OrbitalGlobe({ satellites }) {
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
 
   useEffect(() => {
-    // Automatically measure the container to prevent the canvas from collapsing to 0x0
     const updateDimensions = () => {
       if (containerRef.current) {
         setDimensions({
@@ -17,13 +16,14 @@ export default function OrbitalGlobe({ satellites }) {
       }
     };
     
-    // Slight delay ensures the parent div has fully rendered before measuring
-    setTimeout(updateDimensions, 100);
+    setTimeout(updateDimensions, 150);
     window.addEventListener('resize', updateDimensions);
     
-    // Spin the camera to focus directly on India (ASTRA 2026 Context)
     if (globeRef.current) {
       globeRef.current.pointOfView({ lat: 20.59, lng: 78.96, altitude: 2.2 }, 1000);
+      
+      const globeMaterial = globeRef.current.globeMaterial();
+      globeMaterial.shininess = 120;
     }
     
     return () => window.removeEventListener('resize', updateDimensions);
@@ -36,21 +36,24 @@ export default function OrbitalGlobe({ satellites }) {
           ref={globeRef}
           width={dimensions.width}
           height={dimensions.height}
-          // High-fidelity dark mode Earth textures
-          globeImageUrl="//unpkg.com/three-globe/example/img/earth-dark.jpg"
-          bumpImageUrl="//unpkg.com/three-globe/example/img/earth-topology.png"
-          backgroundColor="#000000"
           
-          // Render the 450+ satellites as glowing nodes
+          globeImageUrl="https://unpkg.com/three-globe/example/img/earth-night.jpg"
+          bumpImageUrl="https://unpkg.com/three-globe/example/img/earth-topology.png"
+          specularImageUrl="https://unpkg.com/three-globe/example/img/earth-water.png"
+          
+          backgroundColor="rgba(0,0,0,0)"
+
+          atmosphereColor="#93c5fd"
+          atmosphereAltitude={0.18}
+          
           pointsData={satellites}
           pointLat="lat"
           pointLng="lng"
-          pointAltitude={() => Math.random() * 0.4 + 0.1} // Staggered orbital heights
+          pointAltitude={() => Math.random() * 0.4 + 0.15}
           
-          // Make the critical targets flash red, while the LEO swarm stays cyan
-          pointColor={(d) => ['INSAT-3DS', 'CHANDRAYAAN-3 ORBITER'].includes(d.name) ? '#ef4444' : '#0ea5e9'}
-          pointRadius={(d) => ['INSAT-3DS', 'CHANDRAYAAN-3 ORBITER'].includes(d.name) ? 0.15 : 0.02}
-          pointResolution={16}
+          pointColor={(d) => ['INSAT-3DS', 'CHANDRAYAAN-3'].includes(d.name) ? '#ef4444' : '#0ea5e9'}
+          pointRadius={(d) => ['INSAT-3DS', 'CHANDRAYAAN-3'].includes(d.name) ? 0.12 : 0.02}
+          pointResolution={32}
         />
       )}
     </div>

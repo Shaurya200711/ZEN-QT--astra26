@@ -1,32 +1,5 @@
-<<<<<<< HEAD
-import EarthMap from '@/components/EarthMap';
-import AiTransmission from '@/components/AiTransmission';
-
-export default function Dev2ZonePreview() {
-  return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 p-6 font-mono">
-      <div className="max-w-7xl mx-auto">
-        <header className="mb-6 border-b border-slate-800 pb-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-lg font-bold text-white tracking-wider">
-              EARTH-SPACE VULNERABILITY INDEX // DEV 2 ZONE PREVIEW
-            </h1>
-            <p className="text-xs text-slate-400">
-              Isolated test route (/dev2) — app/page.js remains untouched
-            </p>
-          </div>
-          <span className="text-xs px-2.5 py-1 rounded bg-emerald-950 text-emerald-400 border border-emerald-500/40">
-            ZONE ISOLATED
-          </span>
-        </header>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 min-h-[460px]">
-          <EarthMap />
-          <AiTransmission />
-        </div>
-      </div>
-=======
 "use client";
+
 import { useState } from "react";
 import dynamic from "next/dynamic";
 import { analyzeCoordinates } from "@/lib/analyzeLocation";
@@ -54,14 +27,34 @@ export default function Dev2Dashboard() {
   };
 
   return (
-    <main className="relative h-screen w-screen overflow-hidden bg-black text-white">
-      <EarthMap onSelectLocation={handleMapClick} selectedCoords={selectedCoords} />
+    <main className="relative h-screen w-screen overflow-hidden bg-slate-950 text-slate-100 font-mono">
+      <header className="absolute top-4 left-4 right-4 z-[900] flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950/85 px-4 py-3 backdrop-blur-md">
+        <div>
+          <h1 className="text-sm sm:text-base font-bold text-white tracking-wider">
+            EARTH-SPACE VULNERABILITY INDEX // DEV 2 ZONE PREVIEW
+          </h1>
+          <p className="text-xs text-slate-400">
+            Click a location on the map to run AI coordinate analysis
+          </p>
+        </div>
+        <span className="text-xs px-2.5 py-1 rounded bg-emerald-950 text-emerald-400 border border-emerald-500/40">
+          DEV 2 ACTIVE
+        </span>
+      </header>
+
+      <EarthMap
+        disasters={[]}
+        onSelectLocation={handleMapClick}
+        selectedCoords={selectedCoords}
+      />
 
       {selectedCoords && (
-        <aside className="absolute bottom-6 left-6 z-[1000] w-96 rounded-xl border border-cyan-500/40 bg-zinc-950/90 p-5">
+        <aside className="absolute bottom-6 left-6 z-[1000] w-96 max-w-[calc(100vw-3rem)] rounded-xl border border-cyan-500/40 bg-zinc-950/90 p-5 backdrop-blur-md">
           <div className="flex justify-between font-mono text-xs text-cyan-400">
             <span>{analysis?.region || "SCANNING..."}</span>
-            <span>{selectedCoords.lat.toFixed(1)}°, {selectedCoords.lng.toFixed(1)}°</span>
+            <span>
+              {selectedCoords.lat.toFixed(1)}°, {selectedCoords.lng.toFixed(1)}°
+            </span>
           </div>
 
           {loading ? (
@@ -77,16 +70,18 @@ export default function Dev2Dashboard() {
                 </span>
               </div>
               <p className="text-xs text-zinc-400">
-                Space Storm Risk: <strong className="text-white">{analysis.spaceWeatherExposure}</strong>
+                Space Storm Risk:{" "}
+                <strong className="text-white">{analysis.spaceWeatherExposure}</strong>
               </p>
               <p className="text-sm text-zinc-300">{analysis.summary}</p>
             </div>
           ) : (
-            <p className="mt-3 text-sm text-red-400">Oops! Check your GROQ_API_KEY.</p>
+            <p className="mt-3 text-sm text-red-400">
+              Could not load analysis. Check your GROQ_API_KEY and /api/groq route.
+            </p>
           )}
         </aside>
       )}
->>>>>>> 19d606d48d6fabdba824bd02999675112e3036b7
     </main>
   );
 }

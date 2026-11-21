@@ -1,18 +1,17 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { supabase } from '../utils/supabase';
 
-// Dynamically import map/globe components to prevent Next.js server crashes
+// Dynamically import map/globe components
 const OrbitalGlobe = dynamic(() => import('../components/OrbitalGlobe'), { ssr: false });
 const EarthMap = dynamic(() => import('../components/EarthMap'), { ssr: false });
 
-// Generate a dense web of 450 simulated satellites to make the globe look active and cinematic
 const LEO_SWARM = Array.from({ length: 450 }, (_, i) => ({
   id: `SWARM-${i}`,
   name: `LEO-NODE-${i}`,
-  alt: Math.random() * 1200 + 200, // Random LEO altitudes between 200km and 1400km
+  alt: Math.random() * 1200 + 200, 
   lat: (Math.random() - 0.5) * 180,
   lng: (Math.random() - 0.5) * 360,
 }));
@@ -21,7 +20,25 @@ const HERO_SATS = [
   { id: 1, name: 'CARTOSAT-3', alt: 509, lat: 13.0, lng: 80.2 },
   { id: 2, name: 'RISAT-2BR1', alt: 576, lat: 15.5, lng: 75.0 },
   { id: 3, name: 'INSAT-3DS', alt: 35786, lat: 0, lng: 82.0 },
-  { id: 4, name: 'CHANDRAYAAN-3 ORBITER', alt: 150, lat: -12.5, lng: 60.1 },
+  { id: 4, name: 'CHANDRAYAAN-3', alt: 150, lat: -12.5, lng: 60.1 },
+];
+
+// Pre-defined AI Assessments for the LLAMA-3 Terminal
+const AI_ASSESSMENTS = [
+  "[PRIORITY ALERT] CYCLONE DANA-II (155 KM/H) CAUSING 78% S-BAND ATTENUATION AT SDSC SHAR. RECOMMEND IMMEDIATE HANDOFF TO ISTRAC BENGALURU & ORBITAL MANEUVER CHECK FOR INSAT-3D.",
+  "[UPDATE] DEBRIS OBJ #8832 TRAJECTORY SHIFT DETECTED. COLLISION PROBABILITY (Pc) REDUCED TO 1.05e-5. NO FURTHER MANEUVERS REQUIRED AT THIS TIME.",
+  "[SYSTEM ALERT] HIGH SOLAR FLARE ACTIVITY DETECTED. EXPECT TEMPORARY L-BAND DEGRADATION ACROSS INDIAN SUBCONTINENT FOR THE NEXT 4 HOURS.",
+  "[ANALYSIS] CARTOSAT-3 IMAGING OF CYCLONE DANA-II IMPACT ZONES COMPLETE. 45GB RAW SYNTHETIC APERTURE RADAR DATA QUEUED FOR DOWNLINK."
+];
+
+// Pool of random telemetry logs to feed into the ISRO terminal
+const LOG_POOL = [
+  { type: "TELEM", color: "text-cyan-600", msg: "INSAT-3D ORBITAL PARAMETERS STABLE. GYROS NOMINAL." },
+  { type: "SYS", color: "text-slate-600", msg: "PERFORMING ROUTINE BACKGROUND HANDSHAKE WITH NETRA..." },
+  { type: "NETRA", color: "text-emerald-600", msg: "TRACKING 454 LEO OBJECTS. DEBRIS FIELD STATUS: GREEN." },
+  { type: "TELEM", color: "text-cyan-600", msg: "RISAT-2BR1 SAR PAYLOAD CALIBRATION COMPLETE." },
+  { type: "WEATHER", color: "text-amber-600", msg: "CYCLONE DANA-II GUSTS EXCEEDING 160 KM/H AT PARADIP COAST." },
+  { type: "HANDOFF", color: "text-purple-600", msg: "COMM LINK SECURED VIA BYALALU DEEP SPACE NETWORK." }
 ];
 
 export default function CommandCenter() {
@@ -32,26 +49,41 @@ export default function CommandCenter() {
   
   const [currentTime, setCurrentTime] = useState("");
   const [activeSat, setActiveSat] = useState('INSAT-3DS');
+  const [burnStatus, setBurnStatus] = useState<'idle' | 'executing' | 'cleared'>('idle');
+
+  // New State for Live Terminals
+  const [isroLogs, setIsroLogs] = useState([
+    { time: "22:46:37 UTC", type: "TELEM", color: "text-cyan-600", msg: "CARTOSAT-3 ALT: 509.2 KM // VEL: 7.61 KM/S // NOMINAL" },
+    { time: "22:46:39 UTC", type: "NETRA", color: "text-emerald-600", msg: "OBJ #8832 RELATIVE VELOCITY: 14.2 KM/S // MISS DIST: 180 M" },
+    { time: "22:46:42 UTC", type: "WEATHER", color: "text-amber-600", msg: "CYCLONE DANA-II CORE PRESSURE: 968 HPA // GUSTS 155 KM/H" },
+    { time: "22:46:44 UTC", type: "HANDOFF", color: "text-purple-600", msg: "SDSC SHAR -> ISTRAC BENGALURU BACKUP RELAY STANDBY" }
+  ]);
+  const [aiFeedIndex, setAiFeedIndex] = useState(0);
+  const [isAiProcessing, setIsAiProcessing] = useState(false);
+  
+  // FIX: Using a ref on the scrollable container itself rather than the bottom element
+  const terminalScrollRef = useRef<HTMLDivElement>(null);
 
   const conjunctionMetrics: Record<string, { pc: string, tca: string, status: string, directive: string }> = {
     'CARTOSAT-3': { 
       pc: '1.24e-4', tca: '42m 10s', status: 'WARNING', 
-      directive: 'Monitor trajectory. Debris pass nominal. Minimal impact on surface imaging expected.' 
+      directive: 'Debris pass nominal. Minimal impact on surface imaging expected.' 
     },
     'RISAT-2BR1': { 
       pc: '3.05e-3', tca: '12m 05s', status: 'ELEVATED', 
-      directive: 'Prepare for potential maneuver. Radar imaging for coastal zones may be briefly interrupted if burn is executed.' 
+      directive: 'Prepare for potential maneuver. Radar imaging may be briefly interrupted.' 
     },
     'INSAT-3DS': { 
       pc: '9.42e-2', tca: '04m 12s', status: 'CRITICAL', 
-      directive: 'Severe cyclonic storm (DANA-II) active. Immediate delta-V burn required. WARNING: Avoidance maneuver will cause 45-minute blackout of meteorological telemetry over Bay of Bengal.' 
+      directive: 'Immediate delta-V burn required to dodge Obj #8832.' 
     },
-    'CHANDRAYAAN-3 ORBITER': { 
+    'CHANDRAYAAN-3': { 
       pc: '7.65e-2', tca: '19m 40s', status: 'CRITICAL', 
-      directive: 'Radial miss distance critical. Immediate prograde burn required for orbital separation.' 
+      directive: 'Radial miss distance critical. Immediate prograde burn required.' 
     }
   };
 
+  // Clock Update
   useEffect(() => {
     const timer = setInterval(() => {
       const now = new Date();
@@ -60,141 +92,374 @@ export default function CommandCenter() {
     return () => clearInterval(timer);
   }, []);
 
+  // Live ISRO Terminal Log Generator
   useEffect(() => {
-    async function fetchTelemetry() {
-      const { data: satData } = await supabase.from('satellites').select('*');
-      if (satData && satData.length > 0) {
-        setSatellites([...LEO_SWARM, ...satData]);
-      }
+    const logInterval = setInterval(() => {
+      const now = new Date();
+      const timeString = now.toISOString().substring(11, 19) + " UTC";
+      const randomLog = LOG_POOL[Math.floor(Math.random() * LOG_POOL.length)];
+      
+      setIsroLogs(prevLogs => {
+        const newLogs = [...prevLogs, { time: timeString, ...randomLog }];
+        return newLogs.slice(-15); 
+      });
+    }, 3500); 
 
-      const { data: disData } = await supabase.from('disasters').select('*');
-      if (disData && disData.length > 0) setDisasters(disData);
-    }
-    fetchTelemetry();
+    return () => clearInterval(logInterval);
   }, []);
+
+  // FIX: Isolated container scrolling so the main page stays perfectly still
+  useEffect(() => {
+    if (terminalScrollRef.current) {
+      terminalScrollRef.current.scrollTo({
+        top: terminalScrollRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
+    }
+  }, [isroLogs]);
 
   const activeMetrics = conjunctionMetrics[activeSat] || conjunctionMetrics['INSAT-3DS'];
 
+  const executeAvoidance = () => {
+    setBurnStatus('executing');
+    setTimeout(() => {
+      setBurnStatus('cleared');
+    }, 3000); 
+  };
+
+  useEffect(() => {
+    setBurnStatus('idle');
+  }, [activeSat]);
+
+  // Handle LLAMA-3 Refresh
+  const handleRefreshAI = () => {
+    if (isAiProcessing) return;
+    setIsAiProcessing(true);
+    setTimeout(() => {
+      setAiFeedIndex(prev => (prev + 1) % AI_ASSESSMENTS.length);
+      setIsAiProcessing(false);
+    }, 1500);
+  };
+
   return (
-    <div className="min-h-screen bg-[#070b14] text-slate-300 p-4 font-sans selection:bg-red-900 selection:text-white">
-      
-      <header className="flex justify-between items-center mb-4 border-b border-slate-800 pb-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-widest text-white flex items-center gap-3">
-            EARTH-SPACE VULNERABILITY INDEX <span className="text-slate-600">//</span> ASTRA 2026
-          </h1>
-          <p className="text-xs font-mono tracking-widest mt-1 text-slate-500 uppercase">Unified Command Nexus</p>
-        </div>
-        <div className="flex gap-4">
-          <div className="bg-emerald-950/30 border border-emerald-900 text-emerald-500 px-3 py-1 text-xs font-mono flex items-center gap-2">
-            <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-            ZONE ISOLATED
-          </div>
-        </div>
-      </header>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <>
+      {/* 3D SATURN BACKGROUND CSS */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        .space-bg {
+          background-color: #02040a;
+          background-image: 
+            radial-gradient(2px 2px at 20px 30px, #eee, rgba(0,0,0,0)), 
+            radial-gradient(2px 2px at 40px 70px, #fff, rgba(0,0,0,0)), 
+            radial-gradient(3px 3px at 50px 160px, #ddd, rgba(0,0,0,0)), 
+            radial-gradient(2px 2px at 90px 40px, #fff, rgba(0,0,0,0)), 
+            radial-gradient(2px 2px at 130px 80px, #fff, rgba(0,0,0,0));
+          background-size: 200px 200px;
+          animation: pan-stars 150s linear infinite;
+        }
         
-        <div className="flex flex-col gap-4">
-          {/* ORBITAL GLOBE */}
-          <div className="bg-[#0b1120] border border-slate-800 rounded-lg overflow-hidden flex flex-col h-[400px]">
-            <div className="bg-slate-900/50 border-b border-slate-800 p-2 px-4 flex justify-between items-center">
-              <span className="text-xs font-mono text-slate-400">MODULE 2 // ORBITAL KINEMATICS</span>
-              <span className="text-xs font-mono text-emerald-500">SATS TRACKED: {satellites.length}</span>
+        .saturn-container {
+          perspective: 1200px;
+          transform-style: preserve-3d;
+        }
+        
+        .saturn-planet {
+          background: radial-gradient(circle at 30% 30%, #334155 0%, #0f172a 40%, #020617 80%, #000 100%);
+          box-shadow: inset -30px -30px 60px rgba(0,0,0,0.9), 0 0 40px rgba(14, 165, 233, 0.1);
+          transform: translate(-50%, -50%);
+          animation: float-planet 20s ease-in-out infinite;
+        }
+
+        .saturn-rings-wrapper {
+          transform: translate(-50%, -50%) rotateX(75deg) rotateY(-20deg);
+          transform-style: preserve-3d;
+          animation: float-planet 20s ease-in-out infinite;
+        }
+
+        .ring {
+          border-radius: 50%;
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+        }
+
+        .ring-inner {
+          width: 800px; height: 800px;
+          border: 2px solid rgba(14, 165, 233, 0.3);
+          border-left: 2px dashed rgba(14, 165, 233, 0.6);
+          box-shadow: 0 0 30px rgba(14, 165, 233, 0.1), inset 0 0 30px rgba(14, 165, 233, 0.1);
+          animation: spin-debris 60s linear infinite;
+        }
+
+        .ring-outer {
+          width: 950px; height: 950px;
+          border: 1px dotted rgba(56, 189, 248, 0.4);
+          box-shadow: 0 0 40px rgba(56, 189, 248, 0.1), inset 0 0 40px rgba(56, 189, 248, 0.1);
+          animation: spin-debris 90s linear infinite reverse;
+        }
+        
+        .ring-dust {
+          width: 1100px; height: 1100px;
+          border: 10px solid rgba(2, 6, 23, 0.5);
+          box-shadow: 0 0 80px rgba(14, 165, 233, 0.05);
+        }
+
+        @keyframes pan-stars {
+          0% { background-position: 0 0; }
+          100% { background-position: -400px -400px; }
+        }
+        @keyframes float-planet {
+          0%, 100% { margin-top: 0px; }
+          50% { margin-top: -25px; }
+        }
+        @keyframes spin-debris {
+          0% { transform: translate(-50%, -50%) rotateZ(0deg); }
+          100% { transform: translate(-50%, -50%) rotateZ(360deg); }
+        }
+
+        /* Custom minimal scrollbar for terminal */
+        .terminal-scroll::-webkit-scrollbar {
+          width: 6px;
+        }
+        .terminal-scroll::-webkit-scrollbar-track {
+          background: rgba(0, 0, 0, 0.2);
+        }
+        .terminal-scroll::-webkit-scrollbar-thumb {
+          background: rgba(6, 182, 212, 0.3);
+          border-radius: 3px;
+        }
+      `}} />
+
+      {/* FIXED 3D ANIMATED BACKGROUND */}
+      <div className="fixed inset-0 z-[-1] space-bg overflow-hidden pointer-events-none saturn-container">
+        {/* Saturn Sphere */}
+        <div className="absolute top-1/2 left-1/2 saturn-planet w-[500px] h-[500px] rounded-full z-10"></div>
+        {/* 3D Tilted Rings Wrapper */}
+        <div className="absolute top-1/2 left-1/2 saturn-rings-wrapper w-full h-full z-20">
+          <div className="ring ring-inner"></div>
+          <div className="ring ring-outer"></div>
+          <div className="ring ring-dust"></div>
+        </div>
+      </div>
+
+      {/* FOREGROUND UI */}
+      <div className="min-h-screen relative z-30 p-6 font-sans text-slate-300">
+        
+        {/* HEADER PANEL */}
+        <header className="bg-[#040814]/80 backdrop-blur-md border border-cyan-900/50 shadow-[0_0_30px_rgba(6,182,212,0.1)] rounded-xl p-5 mb-8 flex justify-between items-center">
+          <div>
+            <h1 className="text-3xl font-extrabold tracking-widest text-cyan-400 flex items-center gap-3 drop-shadow-[0_0_10px_rgba(34,211,238,0.4)]">
+              EARTH-SPACE VULNERABILITY INDEX
+            </h1>
+            <p className="text-sm font-mono tracking-widest mt-1 text-slate-500 uppercase">Astra 2026 // Unified Nexus</p>
+          </div>
+          <div className="flex gap-4">
+            <div className="bg-cyan-950/40 border border-cyan-500/50 text-cyan-400 px-4 py-2 text-sm font-mono flex items-center gap-2 rounded-sm shadow-[0_0_15px_rgba(6,182,212,0.2)]">
+              <div className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse shadow-[0_0_8px_#22d3ee]"></div>
+              UPLINK ACTIVE
             </div>
-            <div className="flex-grow relative bg-black cursor-move">
-              <OrbitalGlobe satellites={satellites} />
-              <div className="absolute bottom-2 left-2 text-[10px] font-mono text-slate-600">INTERACTIVE 3D RENDER // DRAG TO ROTATE</div>
+          </div>
+        </header>
+
+        {/* MAIN TOP GRID */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          
+          {/* LEFT COLUMN: VISUALIZATIONS */}
+          <div className="flex flex-col gap-8">
+            
+            {/* ORBITAL GLOBE */}
+            <div className="bg-[#040814]/80 backdrop-blur-md border border-cyan-900/50 rounded-xl shadow-[0_0_20px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col h-[400px]">
+              <div className="bg-slate-950/80 border-b border-cyan-900/50 p-3 px-5 flex justify-between items-center">
+                <span className="text-xs font-mono text-slate-400">MODULE 2 // ORBITAL KINEMATICS</span>
+                <span className="text-xs font-mono text-cyan-500">SATS TRACKED: 454</span>
+              </div>
+              <div className="flex-grow relative bg-black cursor-move">
+                <OrbitalGlobe satellites={satellites} />
+              </div>
+            </div>
+
+            {/* TERRESTRIAL MAP */}
+            <div className="bg-[#040814]/80 backdrop-blur-md border border-cyan-900/50 rounded-xl shadow-[0_0_20px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col h-[400px]">
+               <div className="bg-slate-950/80 border-b border-cyan-900/50 p-3 px-5 flex justify-between items-center">
+                <span className="text-xs font-mono text-slate-400">MODULE 1 // TERRESTRIAL HAZARD MAP</span>
+                <span className="text-xs font-mono text-red-500 animate-pulse">ACTIVE: CYCLONE DANA-II</span>
+              </div>
+              <div className="flex-grow relative bg-slate-950">
+                <EarthMap disasters={disasters} />
+              </div>
             </div>
           </div>
 
-          {/* TERRESTRIAL MAP */}
-          <div className="bg-[#0b1120] border border-slate-800 rounded-lg overflow-hidden flex flex-col h-[400px]">
-             <div className="bg-slate-900/50 border-b border-slate-800 p-2 px-4 flex justify-between items-center">
-              <span className="text-xs font-mono text-slate-400">MODULE 1 // TERRESTRIAL HAZARD MAP</span>
-              <span className="text-xs font-mono text-amber-500">ACTIVE: {disasters.length}</span>
+          {/* RIGHT COLUMN: AI UPLINK & DEBRIS AVOIDANCE */}
+          <div className="flex flex-col gap-8">
+            <div className="bg-[#040814]/80 backdrop-blur-md border border-cyan-900/50 rounded-xl p-6 shadow-[0_0_30px_rgba(0,0,0,0.6)] flex flex-col relative overflow-hidden">
+              
+              {/* Sci-Fi Satellite Graphic */}
+              <div className="absolute top-4 right-6 opacity-30 pointer-events-none">
+                  <svg viewBox="0 0 100 100" className="w-32 h-32 animate-[spin_30s_linear_infinite]">
+                    <rect x="20" y="40" width="20" height="20" fill="#0f172a" stroke="#06b6d4" strokeWidth="2" />
+                    <rect x="60" y="40" width="20" height="20" fill="#0f172a" stroke="#06b6d4" strokeWidth="2" />
+                    <rect x="40" y="30" width="20" height="40" fill="#1e293b" stroke="#38bdf8" strokeWidth="2" />
+                    <circle cx="50" cy="50" r="4" fill="#ef4444" className="animate-ping" />
+                  </svg>
+              </div>
+
+              <div className="flex justify-between items-center mb-6 relative z-10">
+                <h2 className="font-bold text-xl flex items-center gap-2 text-slate-100 font-mono">
+                  <div className="w-3 h-3 bg-cyan-500 rounded-sm shadow-[0_0_10px_#06b6d4]"></div>
+                  AI CRISIS RESPONSE
+                </h2>
+                <span className="text-cyan-400 font-mono text-sm bg-cyan-950/30 px-3 py-1 border border-cyan-800/50 rounded-sm">{currentTime}</span>
+              </div>
+
+              {/* Satellite Selection Tabs */}
+              <div className="grid grid-cols-4 gap-2 mb-6 relative z-10">
+                {['CARTOSAT-3', 'RISAT-2BR1', 'INSAT-3DS', 'CHANDRAYAAN-3'].map((btn) => (
+                  <button 
+                    key={btn}
+                    onClick={() => setActiveSat(btn)}
+                    className={`text-[10px] sm:text-xs font-mono py-3 transition-all rounded-sm border ${
+                      activeSat === btn 
+                        ? 'bg-cyan-900/60 border-cyan-400 text-cyan-100 shadow-[0_0_15px_rgba(6,182,212,0.3)]' 
+                        : 'bg-slate-900/50 border-slate-700 text-slate-400 hover:bg-slate-800'
+                    }`}
+                  >
+                    {btn}
+                  </button>
+                ))}
+              </div>
+
+              {/* Live Terminal */}
+              <div className="bg-black/60 border border-slate-800 rounded-lg p-5 mb-6 relative z-10 shadow-inner">
+                <h3 className="text-[10px] font-mono text-slate-500 mb-2 uppercase tracking-widest border-b border-slate-800 pb-2">Telemetry Feed</h3>
+                <p className="font-mono text-sm leading-relaxed text-slate-300">
+                  <span className={`${activeMetrics.status === 'CRITICAL' ? 'text-red-500' : 'text-amber-500'}`}>
+                    {">> "} {activeMetrics.status === 'CRITICAL' ? 'WARNING:' : 'NOTICE:'}
+                  </span> Space Debris (Obj #8832) tracking relative to {activeSat}.<br/><br/>
+                  <span className="text-slate-500">Pc:</span> {activeMetrics.pc} <br/>
+                  <span className="text-slate-500">TCA:</span> {activeMetrics.tca} <br/>
+                  <span className="text-cyan-400 mt-2 block">{">"} {activeMetrics.directive}</span>
+                </p>
+              </div>
+
+              {/* Interactive Debris Avoidance System */}
+              <div className="border border-slate-800 rounded-lg p-5 bg-slate-900/40 relative z-10">
+                <h3 className="text-[10px] font-mono text-slate-500 mb-4 uppercase tracking-widest text-center">Thruster Control Override</h3>
+                
+                {burnStatus === 'idle' && (
+                  <button 
+                    onClick={executeAvoidance}
+                    disabled={activeMetrics.status !== 'CRITICAL'}
+                    className={`w-full py-4 text-xs font-mono tracking-widest rounded-sm border transition-all ${
+                      activeMetrics.status === 'CRITICAL' 
+                        ? 'bg-red-950/80 border-red-500 text-red-400 shadow-[0_0_20px_rgba(239,68,68,0.3)] hover:bg-red-900 hover:text-white' 
+                        : 'bg-slate-900/50 border-slate-800 text-slate-600 cursor-not-allowed'
+                    }`}
+                  >
+                    {activeMetrics.status === 'CRITICAL' ? 'INITIATE DELTA-V BURN' : 'NO THREAT DETECTED'}
+                  </button>
+                )}
+
+                {burnStatus === 'executing' && (
+                  <div className="w-full py-4 bg-orange-950/80 border border-orange-500 text-orange-400 text-center text-xs font-mono tracking-widest rounded-sm animate-pulse shadow-[0_0_20px_rgba(249,115,22,0.3)]">
+                    FIRING THRUSTERS... ADJUSTING ORBITAL VECTOR
+                  </div>
+                )}
+
+                {burnStatus === 'cleared' && (
+                  <div className="w-full py-4 bg-emerald-950/80 border border-emerald-500 text-emerald-400 text-center text-xs font-mono tracking-widest rounded-sm shadow-[0_0_20px_rgba(16,185,129,0.2)]">
+                    TRAJECTORY CLEARED. DEBRIS AVOIDED.
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="flex-grow relative bg-slate-950">
-              <EarthMap disasters={disasters} />
+
+            {/* SCROLL DOWN EXPLANATION MENU */}
+            <div className="bg-[#040814]/80 backdrop-blur-md border border-cyan-900/50 rounded-xl shadow-[0_0_20px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col h-64">
+               <div className="bg-slate-950/80 border-b border-cyan-900/50 p-3 px-5 sticky top-0 z-10">
+                <span className="text-xs font-mono text-cyan-500 uppercase tracking-widest">System Documentation // Read Out</span>
+              </div>
+              <div className="p-6 overflow-y-auto font-sans font-light text-sm text-slate-400 space-y-5">
+                <div>
+                  <h4 className="font-bold text-slate-200 mb-1 font-mono text-xs text-cyan-400">1. Orbital Kinematics (3D Globe)</h4>
+                  <p>This module tracks over 450 Low Earth Orbit (LEO) satellites and space debris objects in real-time. It provides immediate visual context of where our critical assets are located relative to impending space threats.</p>
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-200 mb-1 font-mono text-xs text-cyan-400">2. Terrestrial Hazard Map</h4>
+                  <p>Simultaneously maps ground-level disasters (e.g., Cyclone DANA-II). The rings indicate wind speed categories and communication signal attenuation zones, allowing us to see which areas rely on the satellites above.</p>
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-200 mb-1 font-mono text-xs text-cyan-400">3. Automated Debris Avoidance</h4>
+                  <p>When the system detects a high Probability of Collision (Pc), the AI Crisis Response terminal calculates a thruster maneuver (Delta-V burn). Clicking the protocol overrides shifts the satellite out of the debris path, saving the asset.</p>
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-200 mb-1 font-mono text-xs text-cyan-400">4. The ESVI Connection</h4>
+                  <p>The Earth-Space Vulnerability Index proves that saving a satellite from debris isn't just about the satellite—it's about ensuring uninterrupted communication and imaging for the people surviving the cyclone on the ground below.</p>
+                </div>
+              </div>
             </div>
+            
           </div>
         </div>
 
-        {/* AI CRISIS UPLINK */}
-        <div className="flex flex-col gap-4">
-          <div className="bg-[#0b1120] border border-slate-800 rounded-lg p-5 flex flex-col h-full shadow-2xl transition-all duration-300">
-            
-            <div className="flex justify-between items-center mb-6">
-              <h2 className={`font-bold font-mono text-lg flex items-center gap-2 ${activeMetrics.status === 'CRITICAL' ? 'text-red-500' : 'text-amber-500'}`}>
-                {activeMetrics.status === 'CRITICAL' && <div className="w-3 h-3 bg-red-500 rounded-full animate-ping absolute"></div>}
-                <div className={`w-3 h-3 rounded-full relative ${activeMetrics.status === 'CRITICAL' ? 'bg-red-500' : 'bg-amber-500'}`}></div>
-                ISTRAC // NETRA AI CRISIS UPLINK
-              </h2>
-              <div className="flex items-center gap-3">
-                <span className={`border px-3 py-1 text-xs font-bold tracking-widest ${activeMetrics.status === 'CRITICAL' ? 'bg-red-950/50 text-red-500 border-red-900' : 'bg-amber-950/50 text-amber-500 border-amber-900'}`}>
-                  {activeMetrics.status}
-                </span>
-                <span className="text-slate-400 font-mono text-sm">{currentTime}</span>
-              </div>
+        {/* BOTTOM ROW: LIVE TERMINALS */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
+          
+          {/* ISRO COMMAND TERMINAL (LIVE FEED) */}
+          <div className="bg-[#040814]/80 backdrop-blur-md border border-slate-800 rounded-xl p-5 shadow-[0_0_20px_rgba(0,0,0,0.5)] flex flex-col h-64">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3 mb-3">
+              <span className="text-emerald-400 font-mono text-xs font-bold tracking-widest uppercase">ISRO COMMAND TERMINAL_v2.0</span>
+              <span className="bg-red-950/50 border border-red-800 text-red-500 px-2 py-1 text-[10px] font-mono tracking-widest animate-pulse">STREAM ACTIVE</span>
             </div>
-
-            <div className="grid grid-cols-4 gap-2 mb-4">
-              {['CARTOSAT-3', 'RISAT-2BR1', 'INSAT-3DS', 'CHANDRAYAAN-3 ORBITER'].map((btn) => (
-                <button 
-                  key={btn}
-                  onClick={() => setActiveSat(btn)}
-                  className={`text-[10px] sm:text-xs font-mono py-2 transition-colors border ${
-                    activeSat === btn 
-                      ? (activeMetrics.status === 'CRITICAL' ? 'bg-red-900/40 border-red-500 text-red-200 shadow-[0_0_10px_rgba(239,68,68,0.2)]' : 'bg-amber-900/40 border-amber-500 text-amber-200')
-                      : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-400'
-                  }`}
-                >
-                  {btn.replace(' ORBITER', '')}
-                </button>
+            {/* FIX: Using ref here to scroll strictly within this container */}
+            <div 
+              ref={terminalScrollRef}
+              className="flex-grow overflow-y-auto font-mono text-[10px] sm:text-xs text-slate-400 space-y-3 pr-2 terminal-scroll"
+            >
+              {isroLogs.map((log, index) => (
+                <p key={index}>
+                  <span className="text-slate-500">{log.time}</span> <span className={log.color}>[{log.type}]</span> {log.msg}
+                </p>
               ))}
+              <p className="opacity-50 flex gap-2">
+                <span className="text-slate-500">AWAITING TELEMETRY</span>
+                <span className="animate-pulse">...</span>
+              </p>
             </div>
-
-            <div className="flex gap-2 mb-6">
-              <input type="text" value={activeSat} readOnly className="bg-slate-950 border border-slate-700 text-slate-300 font-mono text-sm p-2 w-1/2 focus:outline-none" />
-              <input type="text" value={activeMetrics.pc} readOnly className={`bg-slate-950 border border-slate-700 font-mono text-sm p-2 w-1/4 focus:outline-none text-center ${activeMetrics.status === 'CRITICAL' ? 'text-red-500' : 'text-amber-500'}`} />
-              <div className="flex flex-col w-1/4 gap-1">
-                <div className="text-[10px] text-slate-500 font-mono text-center border border-slate-700 bg-slate-900 py-1">{activeMetrics.tca}</div>
-                <button className="bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold py-1 w-full transition-colors">TRANSMIT</button>
-              </div>
-            </div>
-
-            <div className={`border rounded p-4 font-mono text-sm mb-6 leading-relaxed shadow-inner transition-colors duration-300 ${activeMetrics.status === 'CRITICAL' ? 'bg-[#0a0505] border-red-900/50 text-red-400' : 'bg-[#0a0a05] border-amber-900/50 text-amber-400'}`}>
-              {">>"} ISTRAC NETRA detects incoming Space Debris (Obj #8832) on collision trajectory with {activeSat}. Probability of Collision (Pc): {activeMetrics.pc}. Time of Closest Approach (TCA): {activeMetrics.tca}. {activeMetrics.directive}
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 mb-auto">
-              <div className="border border-slate-800 bg-slate-900/30 p-3">
-                <h3 className="text-[10px] text-slate-500 font-mono tracking-widest mb-2 uppercase border-b border-slate-800 pb-1">Delta-V Protocol</h3>
-                <p className="text-xs text-slate-300 font-mono leading-relaxed">
-                  {activeMetrics.status === 'CRITICAL' ? 'Execute prograde delta-V burn for radial separation.' : 'Maintain current orbital vector. No burn required.'}
-                </p>
-              </div>
-              <div className="border border-slate-800 bg-slate-900/30 p-3">
-                <h3 className="text-[10px] text-slate-500 font-mono tracking-widest mb-2 uppercase border-b border-slate-800 pb-1">Surface Link Status</h3>
-                <p className="text-xs text-slate-300 font-mono leading-relaxed">
-                  {activeSat === 'INSAT-3DS' ? 'Warning: Cyclone DANA-II telemetry will be lost during maneuver.' : 'Ground station uplink signal strength nominal.'}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex justify-between items-center mt-6 pt-4 border-t border-slate-800">
-              <button className="border border-emerald-900 text-emerald-500 bg-emerald-950/20 hover:bg-emerald-900/40 px-4 py-2 text-xs font-mono transition-colors">
-                SIMULATE AVOIDANCE BURN
-              </button>
-              <button className={`${activeMetrics.status === 'CRITICAL' ? 'bg-red-700 hover:bg-red-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'} font-bold px-6 py-2 text-xs font-mono transition-colors`}>
-                RE-PING TELEMETRY
-              </button>
-            </div>
-
           </div>
+
+          {/* LLAMA-3 PRIORITY FEED (INTERACTIVE) */}
+          <div className="bg-[#040814]/80 backdrop-blur-md border border-cyan-900/50 rounded-xl p-5 shadow-[0_0_20px_rgba(0,0,0,0.5)] flex flex-col h-64">
+            <div className="flex justify-between items-center border-b border-cyan-900/50 pb-3 mb-4">
+              <span className="text-cyan-400 font-mono text-xs font-bold tracking-widest uppercase">++ LLAMA-3 PRIORITY TRANSMISSION FEED ++</span>
+              <span className="bg-red-950/50 border border-red-800 text-red-500 px-2 py-1 text-[10px] font-mono tracking-widest">LIVE UPLINK</span>
+            </div>
+            
+            <div className={`flex-grow font-mono text-[10px] sm:text-xs leading-relaxed uppercase transition-opacity duration-300 ${isAiProcessing ? 'text-slate-500' : 'text-slate-300'}`}>
+              {isAiProcessing ? (
+                <div className="flex flex-col gap-2">
+                  <span className="text-cyan-600 animate-pulse">[PROCESSING] CONNECTING TO NETRA MAINFRAME...</span>
+                  <span className="text-cyan-600 animate-pulse delay-75">[PROCESSING] ANALYZING RECENT TELEMETRY...</span>
+                </div>
+              ) : (
+                AI_ASSESSMENTS[aiFeedIndex]
+              )}
+            </div>
+            
+            <div className="flex justify-end mt-auto pt-4">
+              <button 
+                onClick={handleRefreshAI}
+                disabled={isAiProcessing}
+                className="bg-cyan-950/40 border border-cyan-800 text-cyan-400 hover:bg-cyan-900 hover:text-white px-4 py-2 text-[10px] font-mono tracking-widest transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isAiProcessing ? 'ANALYZING...' : 'REFRESH AI ASSESSMENT'}
+              </button>
+            </div>
+          </div>
+
         </div>
 
       </div>
-    </div>
+    </>
   );
 }

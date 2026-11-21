@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+
 ﻿import { NextResponse } from 'next/server';
 import Groq from 'groq-sdk';
 
@@ -128,7 +128,6 @@ Return ONLY the raw JSON object now.`;
     );
   }
 }
-=======
 ﻿export async function analyzeCoordinates({ lat, lng, regionName = "Selected Sector" }) {
   const response = await fetch("/api/groq", {
     method: "POST",
@@ -149,4 +148,3 @@ Return ONLY the raw JSON object now.`;
 
   return response.json();
 }
->>>>>>> 19d606d48d6fabdba824bd02999675112e3036b7
